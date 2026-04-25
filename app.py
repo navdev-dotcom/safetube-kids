@@ -125,7 +125,7 @@ def fetch_safe_videos(query="", sample_size=12):
     return videos
 
 # --- UI Layout ---
-st.title("🏠 SafeTube Kids")
+st.title("🏠 Gleearn Kids")
 st.write("A safe space for kids to explore educational and fun videos.")
 
 # Sidebar Controls
