@@ -4,13 +4,13 @@ import yt_dlp
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="SafeTube Kids 🏠",
+    page_title="Gleearn Kids 🏠",
     page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom Teal Styling to match your original background_color='#008080'
+# Custom Teal Styling to match original background_color='#008080'
 st.markdown("""
     <style>
     .main { background-color: #f0f2f6; }
