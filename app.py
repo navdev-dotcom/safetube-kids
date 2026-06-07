@@ -1,8 +1,6 @@
 import streamlit as st
 import random
 import yt_dlp
-import io
-import urllib.request
 
 # Page setup and baseline aesthetics
 st.set_page_config(page_title="Gleearn Kids 🏠", layout="wide")
@@ -158,27 +156,6 @@ def fetch_all_pool_videos():
 if not st.session_state.videos:
     st.session_state.videos = fetch_all_pool_videos()
 
-# --- SAFE DOWNLOAD CHECKER ENGINE ---
-def download_video_bytes(video_id):
-    """Fetches video data or handles rate limits safely."""
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    ydl_opts = {
-        'format': 'best[ext=mp4]/best',
-        'quiet': True,
-        'no_warnings': True,
-        'socket_timeout': 4  
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            stream_url = info.get('url')
-            if stream_url:
-                with urllib.request.urlopen(stream_url, timeout=4) as response:
-                    return response.read()
-    except:
-        return None
-    return None
-
 def generate_math_problem():
     op = random.choice(['+', '-', '*'])
     n1, n2 = random.randint(1, 10), random.randint(1, 10)
@@ -244,27 +221,14 @@ if master_list:
                             st.rerun()
                             
                 with b_col3:
-                    video_bytes = None
-                    try:
-                        video_bytes = download_video_bytes(vid['id'])
-                    except:
-                        pass
-                    
-                    if video_bytes is None:
-                        st.markdown(
-                            f'<a href="https://ssyoutube.com/en141/youtube-video-downloader?q=https://www.youtube.com/watch?v={vid["id"]}" '
-                            f'target="_blank"><button style="width:100%; border-radius:5px; border:2px solid {current_colors["accent"]}; '
-                            f'background-color:transparent; color:{current_colors["text"]}; padding:4px; cursor:pointer;">📥 Save</button></a>',
-                            unsafe_allow_html=True
-                        )
-                    else:
-                        st.download_button(
-                            label="📥 Save",
-                            data=video_bytes,
-                            file_name=f"{vid['id']}.mp4",
-                            mime="video/mp4",
-                            key=f"dl_{vid['id']}"
-                        )
+                    # Instant-loading direct redirection link with full URL auto-pasted for ssyoutube
+                    target_url = f"https://www.youtube.com/watch?v={vid['id']}"
+                    st.markdown(
+                        f'<a href="https://ssyoutube.com/en141/youtube-video-downloader?q={target_url}" '
+                        f'target="_blank"><button style="width:100%; border-radius:5px; border:2px solid {current_colors["accent"]}; '
+                        f'background-color:transparent; color:{current_colors["text"]}; padding:4px; cursor:pointer;">📥 Save</button></a>',
+                        unsafe_allow_html=True
+                    )
         
         next_tier_has_content = len(master_list) > end_idx
         next_tier_is_locked = st.session_state.unlocked_tier == (tier_idx + 1)
