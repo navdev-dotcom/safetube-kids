@@ -80,14 +80,10 @@ if "favorites" not in st.session_state:
     st.session_state.favorites = []
 if "videos" not in st.session_state:
     st.session_state.videos = []
-if "math_passed" not in st.session_state:
-    st.session_state.math_passed = False
 if "math_problem" not in st.session_state:
     st.session_state.math_problem = None
-if "active_video" not in st.session_state:
-    st.session_state.active_video = None
-if "pending_video_id" not in st.session_state:
-    st.session_state.pending_video_id = None
+if "current_limit" not in st.session_state:
+    st.session_state.current_limit = 12  # Starts by displaying exactly 12 videos
 
 # --- Dynamic Color Theme Application Engine ---
 THEMES = {
@@ -112,18 +108,18 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 @st.cache_data(ttl=600)
-def fetch_videos():
+def fetch_all_pool_videos():
     videos = []
-    sampled_channels = random.sample(list(SAFE_CHANNELS.items()), min(len(SAFE_CHANNELS), 12))
-    
-    ydl_opts = {'quiet': True, 'extract_flat': True, 'playlistend': 4, 'no_warnings': True, 'ignoreerrors': True}
+    # Fetch a wider batch pool from randomly sampled channels
+    sampled_channels = random.sample(list(SAFE_CHANNELS.items()), min(len(SAFE_CHANNELS), 25))
+    ydl_opts = {'quiet': True, 'extract_flat': True, 'playlistend': 5, 'no_warnings': True, 'ignoreerrors': True}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         for name, url in sampled_channels:
             try:
                 info = ydl.extract_info(f"{url}/videos", download=False)
                 if info and 'entries' in info:
                     for entry in info['entries']:
-                        if entry and len(videos) < 24:
+                        if entry and len(videos) < 60:
                             videos.append({
                                 'title': entry.get('title', 'Fun Video'),
                                 'id': entry.get('id'),
@@ -136,7 +132,7 @@ def fetch_videos():
     return videos
 
 if not st.session_state.videos:
-    st.session_state.videos = fetch_videos()
+    st.session_state.videos = fetch_all_pool_videos()
 
 def generate_math_problem():
     op = random.choice(['+', '-', '*'])
@@ -148,7 +144,7 @@ def generate_math_problem():
     else: ans = n1 * n2
     return {"question": f"{n1} {op} {n2}", "answer": ans}
 
-# --- CONTROL BAR INTERFACES ---
+# --- MAIN APP LAYOUT BAR ---
 st.title("Gleearn Kids 🏠")
 c_theme, c_nav = st.columns(2)
 with c_theme:
@@ -156,42 +152,15 @@ with c_theme:
 with c_nav:
     view_mode = st.radio("Navigation View Target:", ["Main Stream Feed", "My Favorites Vault"], horizontal=True)
 
-# Filter targets
-displayed_videos = st.session_state.videos
+# Process visual slice limitations
+master_list = st.session_state.videos
 if view_mode == "My Favorites Vault":
-    displayed_videos = [v for v in st.session_state.videos if v['id'] in st.session_state.favorites]
+    master_list = [v for v in st.session_state.videos if v['id'] in st.session_state.favorites]
 
-# --- PARENT MATH GATE DIALOGUE (Renders right at the top so it's impossible to miss) ---
-if st.session_state.math_problem:
-    st.error("⚠️ **Grown-Up Verification Required**")
-    st.markdown(f"### Solve this puzzle to unlock the video slot: **{st.session_state.math_problem['question']} = ?**")
-    
-    user_ans = st.text_input("Your Answer:", key="math_gate_field")
-    if st.button("Submit Answer 🔓"):
-        try:
-            if int(user_ans) == st.session_state.math_problem['answer']:
-                st.session_state.math_passed = True
-                st.session_state.math_problem = None
-                st.success("Correct! Access approved.")
-                st.session_state.active_video = st.session_state.pending_video_id
-                st.session_state.pending_video_id = None
-                st.rerun()
-            else:
-                st.sidebar.error("Oops! Not quite right. Ask mom/dad for help! 💡")
-                st.error("Oops! Not quite right. Ask mom/dad for help! 💡")
-        except ValueError:
-            st.error("Please enter a valid whole number.")
-    st.markdown("---")
+# Grab only the videos allowed by current limit step size
+displayed_videos = master_list[:st.session_state.current_limit]
 
-# --- CENTRAL THEATER VIEW ---
-if st.session_state.active_video and not st.session_state.math_problem:
-    st.subheader("📺 Playing Now:")
-    st.video(f"https://www.youtube.com/watch?v={st.session_state.active_video}")
-    if st.button("Close Video Player ❌"):
-        st.session_state.active_video = None
-        st.rerun()
-
-# --- MAIN GRIDS ---
+# --- THE GRIDS DISPLAY (Everything stays strictly in position) ---
 if displayed_videos:
     cols = st.columns(3)
     for idx, vid in enumerate(displayed_videos):
@@ -204,19 +173,18 @@ if displayed_videos:
                 </div>
             """, unsafe_allow_html=True)
             
-            is_twelfth = (idx + 1) % 12 == 0
+            # Context-Aware Video Player Rendering right under its card title snippet
+            if st.session_state.get(f"play_active_{vid['id']}", False):
+                st.video(f"https://www.youtube.com/watch?v={vid['id']}")
+                if st.button("❌ Close Video", key=f"close_{vid['id']}"):
+                    st.session_state[f"play_active_{vid['id']}"] = False
+                    st.rerun()
+
             b_col1, b_col2, b_col3 = st.columns(3)
-            
             with b_col1:
-                if is_twelfth and not st.session_state.math_passed:
-                    if st.button("🔒 Locked", key=f"btn_{vid['id']}"):
-                        st.session_state.math_problem = generate_math_problem()
-                        st.session_state.pending_video_id = vid['id']
-                        st.rerun()
-                else:
-                    if st.button("▶️ Play", key=f"btn_{vid['id']}"):
-                        st.session_state.active_video = vid['id']
-                        st.rerun()
+                if st.button("▶️ Play", key=f"btn_{vid['id']}"):
+                    st.session_state[f"play_active_{vid['id']}"] = True
+                    st.rerun()
                         
             with b_col2:
                 if vid['id'] in st.session_state.favorites:
@@ -231,8 +199,35 @@ if displayed_videos:
             with b_col3:
                 st.download_button(
                     label="📥 Save",
-                    data=f"Video metadata tag link verification check: {vid['id']}",
-                    file_name=f"safe_video_{vid['id']}.txt",
+                    data=f"Video ID Meta Reference Tag: {vid['id']}",
+                    file_name=f"gleearn_{vid['id']}.txt",
                     mime="text/plain",
                     key=f"dl_{vid['id']}"
                 )
+
+# --- THE BOTTOM MOUNTED PROGRESS GATING CHECKPOINT ---
+if view_mode != "My Favorites Vault" and len(master_list) > st.session_state.current_limit:
+    st.markdown("---")
+    st.markdown("<center><h3>🛑 Math Checkpoint! Solve to load 12 more videos</h3></center>", unsafe_allow_html=True)
+    
+    # Initialize bottom math question if empty
+    if not st.session_state.math_problem:
+        st.session_state.math_problem = generate_math_problem()
+        
+    st.info(f"**Grown-Up Verification Puzzle:** Calculate:  ` {st.session_state.math_problem['question']} = ? `")
+    
+    col_ans, col_sub = st.columns([3, 1])
+    with col_ans:
+        user_input = st.text_input("Type your answer here to reveal more items:", key="bottom_gate_input", label_visibility="collapsed")
+    with col_sub:
+        if st.button("Unlock Next Feed 🔓", use_container_width=True):
+            try:
+                if int(user_input) == st.session_state.math_problem['answer']:
+                    st.session_state.current_limit += 12 # Increment view block footprint by 12 items
+                    st.session_state.math_problem = None  # Flush out old problem statement to force fresh evaluation next loop
+                    st.toast("Success! Loading more videos down below...", icon="🎉")
+                    st.rerun()
+                else:
+                    st.error("Oops! Not quite right. Ask mom/dad for help! 💡")
+            except ValueError:
+                st.error("Please provide a valid whole number value.")
