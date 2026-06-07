@@ -133,15 +133,18 @@ st.markdown(f"""
 @st.cache_data(ttl=600)
 def fetch_all_pool_videos():
     videos = []
-    sampled_channels = random.sample(list(SAFE_CHANNELS.items()), min(len(SAFE_CHANNELS), 25))
-    ydl_opts = {'quiet': True, 'extract_flat': True, 'playlistend': 5, 'no_warnings': True, 'ignoreerrors': True}
+    # Sample 30 random channels from our safe selection pool
+    sampled_channels = random.sample(list(SAFE_CHANNELS.items()), min(len(SAFE_CHANNELS), 30))
+    # Increased playlistend to 20 to fetch more contextual video entries per channel
+    ydl_opts = {'quiet': True, 'extract_flat': True, 'playlistend': 20, 'no_warnings': True, 'ignoreerrors': True}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         for name, url in sampled_channels:
             try:
                 info = ydl.extract_info(f"{url}/videos", download=False)
                 if info and 'entries' in info:
                     for entry in info['entries']:
-                        if entry and len(videos) < 60:
+                        # Expanded video list buffer ceiling up to 150 items for broader search depth
+                        if entry and len(videos) < 150:
                             videos.append({
                                 'title': entry.get('title', 'Fun Video'),
                                 'id': entry.get('id'),
@@ -153,7 +156,6 @@ def fetch_all_pool_videos():
     random.shuffle(videos)
     return videos
 
-# Populate video list state on load so it doesn't shuffle during filtering searches
 if not st.session_state.videos:
     st.session_state.videos = fetch_all_pool_videos()
 
@@ -173,7 +175,6 @@ master_list = st.session_state.videos
 if view_mode == "My Favorites Vault":
     master_list = [v for v in st.session_state.videos if v['id'] in st.session_state.favorites]
 
-# Performs filtering smoothly on a static dataset pool
 if search_query:
     master_list = [v for v in master_list if search_query.lower() in v['title'].lower()]
 
@@ -223,7 +224,6 @@ if master_list:
                             st.rerun()
                             
                 with b_col3:
-                    # Formatted ssyoutube helper string that processes target parameters automatically
                     ss_download_url = f"https://ssyoutube.com/watch?v={vid['id']}"
                     st.markdown(
                         f'<a href="{ss_download_url}" target="_blank">'
@@ -235,7 +235,6 @@ if master_list:
         next_tier_has_content = len(master_list) > end_idx
         next_tier_is_locked = st.session_state.unlocked_tier == (tier_idx + 1)
         
-        # Grid gating is disabled when searching so users can see matches instantly
         if view_mode != "My Favorites Vault" and not search_query and next_tier_has_content and next_tier_is_locked:
             st.markdown("---")
             st.markdown(f"<center><h3>🛑 Checkpoint reached after {end_idx} videos! Solve to unlock next row</h3></center>", unsafe_allow_html=True)
