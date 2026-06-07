@@ -166,7 +166,7 @@ def download_video_bytes(video_id):
         'format': 'best[ext=mp4]/best',
         'quiet': True,
         'no_warnings': True,
-        'socket_timeout': 4  # Strict timeout limit to prevent cloud freezes
+        'socket_timeout': 4  
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -238,13 +238,12 @@ if master_list:
                         if st.button("❤️ Unfav", key=f"fav_{vid['id']}"):
                             st.session_state.favorites.remove(vid['id'])
                             st.rerun()
-                else:
-                    if st.button("⭐ Fav", key=f"fav_{vid['id']}"):
-                        st.session_state.favorites.append(vid['id'])
-                        st.rerun()
+                    else:
+                        if st.button("⭐ Fav", key=f"fav_{vid['id']}"):
+                            st.session_state.favorites.append(vid['id'])
+                            st.rerun()
                             
                 with b_col3:
-                    # Fallback Download Wrapper
                     video_bytes = None
                     try:
                         video_bytes = download_video_bytes(vid['id'])
@@ -252,7 +251,6 @@ if master_list:
                         pass
                     
                     if video_bytes is None:
-                        # Fallback link button so it completely avoids Streamlit type errors
                         st.markdown(
                             f'<a href="https://ssyoutube.com/en141/youtube-video-downloader?q=https://www.youtube.com/watch?v={vid["id"]}" '
                             f'target="_blank"><button style="width:100%; border-radius:5px; border:2px solid {current_colors["accent"]}; '
