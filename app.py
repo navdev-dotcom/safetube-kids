@@ -3,7 +3,7 @@ import random
 import yt_dlp
 
 # Page setup and baseline aesthetics
-st.set_page_config(page_title="SafeTube Kids 🏠", layout="wide")
+st.set_page_config(page_title="Gleearn Kids 🏠", layout="wide")
 
 # --- All Safe Channel Data ---
 SAFE_CHANNELS = {
@@ -86,6 +86,8 @@ if "math_problem" not in st.session_state:
     st.session_state.math_problem = None
 if "active_video" not in st.session_state:
     st.session_state.active_video = None
+if "pending_video_id" not in st.session_state:
+    st.session_state.pending_video_id = None
 
 # --- Dynamic Color Theme Application Engine ---
 THEMES = {
@@ -109,10 +111,9 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=600)  # Caches video lists to speed up loads and avoid rate limits
+@st.cache_data(ttl=600)
 def fetch_videos():
     videos = []
-    # Samples a random batch of 12 channels per page reload to provide an infinite mix feel
     sampled_channels = random.sample(list(SAFE_CHANNELS.items()), min(len(SAFE_CHANNELS), 12))
     
     ydl_opts = {'quiet': True, 'extract_flat': True, 'playlistend': 4, 'no_warnings': True, 'ignoreerrors': True}
@@ -127,7 +128,7 @@ def fetch_videos():
                                 'title': entry.get('title', 'Fun Video'),
                                 'id': entry.get('id'),
                                 'thumb': f"https://img.youtube.com/vi/{entry.get('id')}/mqdefault.jpg",
-                                'channel': entry.get('uploader', 'Safe Kids Content')
+                                'channel': entry.get('uploader', 'Gleearn Safe Content')
                             })
             except:
                 continue
@@ -148,7 +149,7 @@ def generate_math_problem():
     return {"question": f"{n1} {op} {n2}", "answer": ans}
 
 # --- CONTROL BAR INTERFACES ---
-st.title("SafeTube Kids 🏠")
+st.title("Gleearn Kids 🏠")
 c_theme, c_nav = st.columns(2)
 with c_theme:
     st.session_state.theme = st.selectbox("Choose App Palette Theme:", options=list(THEMES.keys()))
@@ -160,11 +161,10 @@ displayed_videos = st.session_state.videos
 if view_mode == "My Favorites Vault":
     displayed_videos = [v for v in st.session_state.videos if v['id'] in st.session_state.favorites]
 
-# --- PARENT MATH GATE DIALOGUE ---
+# --- PARENT MATH GATE DIALOGUE (Renders right at the top so it's impossible to miss) ---
 if st.session_state.math_problem:
-    st.markdown("---")
-    st.warning("⚠️ **Grown-Up Verification Required**")
-    st.write(f"Solve this puzzle to unlock the 12th video item slot: **{st.session_state.math_problem['question']} = ?**")
+    st.error("⚠️ **Grown-Up Verification Required**")
+    st.markdown(f"### Solve this puzzle to unlock the video slot: **{st.session_state.math_problem['question']} = ?**")
     
     user_ans = st.text_input("Your Answer:", key="math_gate_field")
     if st.button("Submit Answer 🔓"):
@@ -173,12 +173,14 @@ if st.session_state.math_problem:
                 st.session_state.math_passed = True
                 st.session_state.math_problem = None
                 st.success("Correct! Access approved.")
-                st.session_state.active_video = st.session_state.get("pending_video_id")
+                st.session_state.active_video = st.session_state.pending_video_id
+                st.session_state.pending_video_id = None
                 st.rerun()
             else:
+                st.sidebar.error("Oops! Not quite right. Ask mom/dad for help! 💡")
                 st.error("Oops! Not quite right. Ask mom/dad for help! 💡")
         except ValueError:
-            st.error("Please enter a valid number result.")
+            st.error("Please enter a valid whole number.")
     st.markdown("---")
 
 # --- CENTRAL THEATER VIEW ---
@@ -207,7 +209,7 @@ if displayed_videos:
             
             with b_col1:
                 if is_twelfth and not st.session_state.math_passed:
-                    if st.button("🔒 Play", key=f"btn_{vid['id']}"):
+                    if st.button("🔒 Locked", key=f"btn_{vid['id']}"):
                         st.session_state.math_problem = generate_math_problem()
                         st.session_state.pending_video_id = vid['id']
                         st.rerun()
