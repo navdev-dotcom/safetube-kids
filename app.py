@@ -153,6 +153,7 @@ def fetch_all_pool_videos():
     random.shuffle(videos)
     return videos
 
+# Populate video list state on load so it doesn't shuffle during filtering searches
 if not st.session_state.videos:
     st.session_state.videos = fetch_all_pool_videos()
 
@@ -172,13 +173,14 @@ master_list = st.session_state.videos
 if view_mode == "My Favorites Vault":
     master_list = [v for v in st.session_state.videos if v['id'] in st.session_state.favorites]
 
+# Performs filtering smoothly on a static dataset pool
 if search_query:
     master_list = [v for v in master_list if search_query.lower() in v['title'].lower()]
 
 if master_list:
     chunk_size = 12
     total_available_chunks = (len(master_list) + chunk_size - 1) // chunk_size
-    visible_chunks_count = total_available_chunks if view_mode == "My Favorites Vault" else st.session_state.unlocked_tier
+    visible_chunks_count = total_available_chunks if view_mode == "My Favorites Vault" or search_query else st.session_state.unlocked_tier
     
     for tier_idx in range(visible_chunks_count):
         start_idx = tier_idx * chunk_size
@@ -221,11 +223,11 @@ if master_list:
                             st.rerun()
                             
                 with b_col3:
-                    # Instant-loading direct redirection link with full URL auto-pasted for ssyoutube
-                    target_url = f"https://www.youtube.com/watch?v={vid['id']}"
+                    # Formatted ssyoutube helper string that processes target parameters automatically
+                    ss_download_url = f"https://ssyoutube.com/watch?v={vid['id']}"
                     st.markdown(
-                        f'<a href="https://ssyoutube.com/en141/youtube-video-downloader?q={target_url}" '
-                        f'target="_blank"><button style="width:100%; border-radius:5px; border:2px solid {current_colors["accent"]}; '
+                        f'<a href="{ss_download_url}" target="_blank">'
+                        f'<button style="width:100%; border-radius:5px; border:2px solid {current_colors["accent"]}; '
                         f'background-color:transparent; color:{current_colors["text"]}; padding:4px; cursor:pointer;">📥 Save</button></a>',
                         unsafe_allow_html=True
                     )
@@ -233,7 +235,8 @@ if master_list:
         next_tier_has_content = len(master_list) > end_idx
         next_tier_is_locked = st.session_state.unlocked_tier == (tier_idx + 1)
         
-        if view_mode != "My Favorites Vault" and next_tier_has_content and next_tier_is_locked:
+        # Grid gating is disabled when searching so users can see matches instantly
+        if view_mode != "My Favorites Vault" and not search_query and next_tier_has_content and next_tier_is_locked:
             st.markdown("---")
             st.markdown(f"<center><h3>🛑 Checkpoint reached after {end_idx} videos! Solve to unlock next row</h3></center>", unsafe_allow_html=True)
             
