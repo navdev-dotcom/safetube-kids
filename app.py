@@ -1,45 +1,12 @@
 import streamlit as st
 import random
 import yt_dlp
+import os
 
-# --- Page Configuration ---
-st.set_page_config(
-    page_title="Gleearn Kids 🏠",
-    page_icon="🏠",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Set up page configurations and baseline aesthetic styles
+st.set_page_config(page_title="SafeTube Kids 🏠", layout="wide")
 
-# --- Theme Configuration (Green, Blue, Teal) ---
-# Initialize theme settings in session state if not present
-if "app_theme" not in st.session_state:
-    st.session_state.app_theme = "Neutral Mode (Teal)"
-
-# Theme color configurations
-THEME_STYLES = {
-    "Calm Mode (Green)": {"bg": "#e8f5e9", "primary": "#2e7d32", "accent": "#a5d6a744"},
-    "Learning Mode (Blue)": {"bg": "#e3f2fd", "primary": "#1565c0", "accent": "#90caf944"},
-    "Neutral Mode (Teal)": {"bg": "#e0f2f1", "primary": "#008080", "accent": "#00808022"}
-}
-
-selected_theme = st.session_state.app_theme
-theme_colors = THEME_STYLES[selected_theme]
-
-# Inject Dynamic Styles
-st.markdown(f"""
-    <style>
-    .stApp {{ background-color: {theme_colors['accent']}; }}
-    h1, h2, h3 {{ color: {theme_colors['primary']} !important; }}
-    .stButton>button {{
-        background-color: {theme_colors['primary']};
-        color: white;
-        border-radius: 8px;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
-
-
-# --- Full Safe Channel Data ---
+# --- Safe Channel Data ---
 SAFE_CHANNELS = {
     "msrachel": "https://www.youtube.com/@msrachel",
     "bluesclues": "https://www.youtube.com/@bluesclues",
@@ -85,7 +52,6 @@ SAFE_CHANNELS = {
     "Numberblocks": "https://www.youtube.com/@Numberblocks",
     "artforkidshub": "https://www.youtube.com/@artforkidshub",
     "klunatik": "https://www.youtube.com/@klunatik",
-    "user-cx1ru4jx3x": "https://www.youtube.com/@user-cx1ru4jx3x",
     "SpongeBobOfficial": "https://www.youtube.com/@SpongeBobOfficial",
     "JackHartmann": "https://www.youtube.com/@JackHartmann",
     "Peekaboo_Kidz": "https://www.youtube.com/@Peekaboo_Kidz",
@@ -107,135 +73,193 @@ SAFE_CHANNELS = {
     "zeneiasasmr": "https://www.youtube.com/@zeneiasasmr"
 }
 
-# --- Caching Logic ---
-@st.cache_data(ttl=600)
-def fetch_safe_videos(query="", sample_size=15): # Expanded sample size to showcase scrolling past 10
+# Initialize session parameters to track across re-renders
+if "theme" not in st.session_state:
+    st.session_state.theme = "Teal (Neutral Mode)"
+if "favorites" not in st.session_state:
+    st.session_state.favorites = []
+if "videos" not in st.session_state:
+    st.session_state.videos = []
+if "math_passed" not in st.session_state:
+    st.session_state.math_passed = False
+if "math_problem" not in st.session_state:
+    st.session_state.math_problem = None
+
+# --- Dynamic Color Theme Application Engine ---
+THEMES = {
+    "Teal (Neutral Mode)": {"bg": "#004d4d", "card": "#008080", "accent": "#00cd9a", "text": "#ffffff"},
+    "Green (Glee Mode)": {"bg": "#143d14", "card": "#1e5c1e", "accent": "#81c784", "text": "#ffffff"},
+    "Blue (Learn Mode)": {"bg": "#0a2540", "card": "#1034a6", "accent": "#42a5f5", "text": "#ffffff"}
+}
+current_colors = THEMES[st.session_state.theme]
+
+# Inject matching styles directly into Streamlit components
+st.markdown(f"""
+    <style>
+        .stApp {{ background-color: {current_colors['bg']}; color: {current_colors['text']}; }}
+        div[data-testid="stMarkdownContainer"] p {{ color: {current_colors['text']}; }}
+        .video-card {{
+            background-color: {current_colors['card']};
+            border: 2px solid {current_colors['accent']};
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }}
+    </style>
+""", unsafe_allow_html=True)
+
+# --- Video Fetch Engine Engine via yt_dlp ---
+def fetch_videos(query="", sample_size=6, max_results=24):
     videos = []
-    selected_channels = random.sample(list(SAFE_CHANNELS.values()), min(len(SAFE_CHANNELS), sample_size))
+    selected_urls = random.sample(list(SAFE_CHANNELS.values()), min(len(SAFE_CHANNELS), sample_size))
     
     ydl_opts = {
         'quiet': True,
         'extract_flat': True,
-        'playlistend': 5, 
+        'playlistend': 5,
         'no_warnings': True,
         'ignoreerrors': True,
+        'skip_download': True,
     }
-
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        for channel_url in selected_channels:
+        for base_url in selected_urls:
             try:
-                info = ydl.extract_info(f"{channel_url}/videos", download=False)
+                info = ydl.extract_info(f"{base_url}/videos", download=False)
                 if info and 'entries' in info:
                     for entry in info['entries']:
                         if entry:
-                            title = entry.get('title', 'Safe Video')
-                            v_id = entry.get('id')
+                            title = entry.get('title', 'Video Asset')
+                            video_id = entry.get('id')
                             if not query or query.lower() in title.lower():
-                                videos.append({
-                                    'title': title,
-                                    'id': v_id,
-                                    'channel': entry.get('uploader', 'Safe Creator')
-                                })
+                                if video_id:
+                                    thumb = f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
+                                    videos.append({
+                                        'title': title,
+                                        'id': video_id,
+                                        'thumb': thumb,
+                                        'channel': entry.get('uploader', 'Safe Content')
+                                    })
             except:
                 continue
-    
     random.shuffle(videos)
-    return videos
+    return videos[:max_results]
 
-# --- Math Question Generator Helper ---
-def generate_math_question():
-    operation = random.choice(["+", "-", "*", "/"])
-    if operation == "+":
-        num1, num2 = random.randint(5, 20), random.randint(5, 20)
-        ans = num1 + num2
-    elif operation == "-":
-        num1 = random.randint(10, 30)
+# --- Math Question Generation Logic ---
+def generate_math_problem():
+    ops = ['+', '-', '*', '/']
+    op = random.choice(ops)
+    if op == '/':
+        num2 = random.randint(1, 5)
+        ans = random.randint(1, 6)
+        num1 = num2 * ans # Ensures cleanly divisible whole integers
+    elif op == '*':
+        num1 = random.randint(1, 6)
+        num2 = random.randint(1, 6)
+        ans = num1 * num2
+    elif op == '-':
+        num1 = random.randint(5, 20)
         num2 = random.randint(1, num1)
         ans = num1 - num2
-    elif operation == "*":
-        num1, num2 = random.randint(2, 9), random.randint(2, 9)
-        ans = num1 * num2
-    else:  # Division
-        num2 = random.randint(2, 8)
-        ans = random.randint(2, 10)
-        num1 = num2 * ans
-    return f"{num1} {operation} {num2}", ans
+    else:
+        num1 = random.randint(1, 20)
+        num2 = random.randint(1, 20)
+        ans = num1 + num2
+    return {"question": f"{num1} {op} {num2}", "answer": ans}
 
-# Initialize Session States for Parental Controls
-if "math_question" not in st.session_state:
-    q_str, q_ans = generate_math_question()
-    st.session_state.math_question = q_str
-    st.session_state.math_answer = q_ans
-    st.session_state.gate_passed = False
+# --- Action Bar UI Layout ---
+st.title("SafeTube Kids 🏠")
+col_search, col_theme, col_nav = st.columns([3, 2, 2])
 
-# --- UI Layout ---
-st.title("🏠 Gleearn Kids")
-st.write("A safe space for kids to explore educational and fun videos.")
-
-# Sidebar Controls
-with st.sidebar:
-    st.header("Search & Settings")
-    query = st.text_input("What do you want to watch?", placeholder="e.g. Science, Peppa...")
-    
-    # Theme Selection UI
-    theme_choice = st.selectbox(
-        "Choose Screen Mode:", 
-        options=["Calm Mode (Green)", "Learning Mode (Blue)", "Neutral Mode (Teal)"],
-        index=list(THEME_STYLES.keys()).index(st.session_state.app_theme)
+with col_theme:
+    st.session_state.theme = st.selectbox(
+        "Choose App Palette Theme:", 
+        options=["Teal (Neutral Mode)", "Green (Glee Mode)", "Blue (Learn Mode)"]
     )
-    if theme_choice != st.session_state.app_theme:
-        st.session_state.app_theme = theme_choice
-        st.rerun()
-        
-    if st.button("🔄 Refresh Feed"):
-        # Reset math gate on manual clear
-        q_str, q_ans = generate_math_question()
-        st.session_state.math_question = q_str
-        st.session_state.math_answer = q_ans
-        st.session_state.gate_passed = False
-        st.cache_data.clear()
-        st.rerun()
-    
-    st.markdown("---")
-    st.info(f"Currently monitoring **{len(SAFE_CHANNELS)}** verified safe channels.")
 
-# --- Content Area ---
-with st.spinner("🔍 Gathering safe videos..."):
-    results = fetch_safe_videos(query=query)
+with col_search:
+    search_query = st.text_input("Search child-safe content details:", placeholder="Type keywords here...")
+    if st.button("🔍 Search Engine Go"):
+        st.session_state.videos = fetch_videos(query=search_query)
+        st.session_state.math_passed = False # Reset gate flags upon search generation changes
 
-if not results:
-    st.error("No videos found! Try a different search word or refresh the feed.")
+with col_nav:
+    view_mode = st.radio("Navigation View Target:", ["Main Stream Feed", "My Favorites Vault"])
+    if st.button("🔄 Refresh Data Streams") or not st.session_state.videos:
+        st.session_state.videos = fetch_videos()
+        st.session_state.math_passed = False
+
+# Filter downstream parameters based on structural selection
+displayed_videos = st.session_state.videos
+if view_mode == "My Favorites Vault":
+    displayed_videos = [v for v in st.session_state.videos if v['id'] in st.session_state.favorites]
+
+# --- Structural Core Video Grid Engine Render ---
+if not displayed_videos:
+    st.info("No video profiles found under chosen filter conditions.")
 else:
-    # Responsive Grid Display
+    # Iterate dynamically using 3 columns
     cols = st.columns(3)
-    
-    for index, video in enumerate(results):
-        # Trigger Math Check Gate at every 10th milestone item (index 10, 20, etc.)
-        if index > 0 and index % 10 == 0:
-            if not st.session_state.gate_passed:
-                st.markdown("---")
-                st.subheader("🛑 Screen Time Break! Let's solve a puzzle to load more videos.")
-                
-                # Input container box
-                with st.container(border=True):
-                    st.write(f"What is: **{st.session_state.math_question}**?")
-                    user_ans = st.number_input("Type your answer here:", value=None, step=1, key=f"gate_{index}")
-                    
-                    if user_ans is not None:
-                        if user_ans == st.session_state.math_answer:
-                            st.session_state.gate_passed = True
-                            st.success("Great job! Loading more videos...")
-                            st.rerun()
-                        else:
-                            st.error("Oops! Not quite right. Ask mom/dad for help! 💡")
-                
-                # Stop parsing the rest of the layout until condition is verified
-                break
+    for index, vid in enumerate(displayed_videos):
+        col_target = cols[index % 3]
+        
+        with col_target:
+            st.markdown(f"""
+                <div class='video-card'>
+                    <img src="{vid['thumb']}" style='width:100%; border-radius:6px;'>
+                    <h4 style='margin: 10px 0 5px 0; height: 45px; overflow: hidden;'>{vid['title']}</h4>
+                    <p style='color: {current_colors['accent']}; font-size: 0.85em;'>{vid['channel']}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Action controls row
+            c1, c2, c3 = st.columns([1, 1, 1])
+            
+            # ⚠️ Math Gate Evaluation Condition Triggers Every 12th Element (index 11, 23, etc)
+            is_twelfth_video = (index + 1) % 12 == 0
+            
+            with c1:
+                if is_twelfth_video and not st.session_state.math_passed:
+                    if st.button("🔓 Unlock", key=f"lock_{vid['id']}"):
+                        st.session_state.math_problem = generate_math_problem()
+                        st.rerun()
+                else:
+                    if st.button("▶️ Play", key=f"play_{vid['id']}"):
+                        st.video(f"https://www.youtube.com/watch?v={vid['id']}")
+                        
+            with c2:
+                if vid['id'] in st.session_state.favorites:
+                    if st.button("❤️ Unfav", key=f"fav_{vid['id']}"):
+                        st.session_state.favorites.remove(vid['id'])
+                        st.rerun()
+                else:
+                    if st.button("⭐ Fav", key=f"fav_{vid['id']}"):
+                        st.session_state.favorites.append(vid['id'])
+                        st.rerun()
+                        
+            with c3:
+                # Direct Simulated Web Safe Downloading Proxy Mechanism
+                st.download_button(
+                    label="📥 Save",
+                    data=f"Video ID Meta Reference: {vid['id']}",
+                    file_name=f"safetube_{vid['id']}.txt",
+                    mime="text/plain",
+                    key=f"dl_{vid['id']}"
+                )
 
-        # Render rows dynamically inside the standard grid columns 
-        col_idx = index % 3
-        with cols[col_idx]:
-            st.video(f"https://www.youtube.com/watch?v={video['id']}")
-            st.caption(f"**{video['title']}**")
-            st.markdown(f"*Source: {video['channel']}*")
-            st.write("")  # Margin spacing padding
+# --- Math Verification Floating Dialogue Box Panel ---
+if st.session_state.math_problem is not None and not st.session_state.math_passed:
+    st.markdown("---")
+    st.subheader("🧠 Verification Gate Challenge!")
+    st.write(f"Solve this math equation to securely parse the target payload content stream: **{st.session_state.math_problem['question']}**")
+    
+    user_ans = st.number_input("Enter calculation result:", step=1, key="math_gate_input")
+    
+    if st.button("Verify Answer"):
+        if user_ans == st.session_state.math_problem['answer']:
+            st.success("Correct! Fetching next index blocks.")
+            st.session_state.math_passed = True
+            st.session_state.math_problem = None
+            st.session_state.videos += fetch_videos(sample_size=4) # Appends additional fresh video feeds
+            st.rerun()
+        else:
+            st.error("Oops! Not quite right. Ask mom/dad for help! 💡")
