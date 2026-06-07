@@ -1,6 +1,8 @@
 import streamlit as st
 import random
 import yt_dlp
+import io
+import urllib.request
 
 # Page setup and baseline aesthetics
 st.set_page_config(page_title="Gleearn Kids 🏠", layout="wide")
@@ -80,10 +82,10 @@ if "favorites" not in st.session_state:
     st.session_state.favorites = []
 if "videos" not in st.session_state:
     st.session_state.videos = []
-if "math_problem" not in st.session_state:
-    st.session_state.math_problem = None
-if "current_limit" not in st.session_state:
-    st.session_state.current_limit = 12  # Starts by displaying exactly 12 videos
+if "unlocked_tier" not in st.session_state:
+    st.session_state.unlocked_tier = 1  
+if "math_problems" not in st.session_state:
+    st.session_state.math_problems = {}
 
 # --- Dynamic Color Theme Application Engine ---
 THEMES = {
@@ -91,8 +93,25 @@ THEMES = {
     "Green (Glee Mode)": {"bg": "#143d14", "card": "#1e5c1e", "accent": "#81c784", "text": "#ffffff"},
     "Blue (Learn Mode)": {"bg": "#0a2540", "card": "#1034a6", "accent": "#42a5f5", "text": "#ffffff"}
 }
-current_colors = THEMES[st.session_state.theme]
 
+# --- SIDEBAR INTERFACE COMPONENT PACKING ---
+with st.sidebar:
+    st.header("⚙️ App Controls")
+    st.session_state.theme = st.selectbox("Choose App Palette Theme:", options=list(THEMES.keys()))
+    current_colors = THEMES[st.session_state.theme]
+    st.markdown("---")
+    view_mode = st.radio("Navigation View Target:", ["Main Stream Feed", "My Favorites Vault"])
+    st.markdown("---")
+    search_query = st.text_input("🔍 Search Videos:", value="", placeholder="Type video keywords here...")
+    st.markdown("---")
+    if st.button("🔄 Refresh Feed & Clear Cache", use_container_width=True):
+        st.session_state.videos = []
+        st.session_state.unlocked_tier = 1
+        st.session_state.math_problems = {}
+        st.cache_data.clear()
+        st.rerun()
+
+# Apply the custom styles based on selection
 st.markdown(f"""
     <style>
         .stApp {{ background-color: {current_colors['bg']}; color: {current_colors['text']}; }}
@@ -104,13 +123,18 @@ st.markdown(f"""
             padding: 15px;
             margin-bottom: 5px;
         }}
+        .video-card h5 {{
+            margin: 10px 0;
+            color: {current_colors['text']};
+            word-wrap: break-word;
+            white-space: normal;
+        }}
     </style>
 """, unsafe_allow_html=True)
 
 @st.cache_data(ttl=600)
 def fetch_all_pool_videos():
     videos = []
-    # Fetch a wider batch pool from randomly sampled channels
     sampled_channels = random.sample(list(SAFE_CHANNELS.items()), min(len(SAFE_CHANNELS), 25))
     ydl_opts = {'quiet': True, 'extract_flat': True, 'playlistend': 5, 'no_warnings': True, 'ignoreerrors': True}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -134,6 +158,28 @@ def fetch_all_pool_videos():
 if not st.session_state.videos:
     st.session_state.videos = fetch_all_pool_videos()
 
+# --- BACKEND REAL-TIME DOWNLOAD PIPELINE ---
+def download_video_bytes(video_id):
+    """Fetches the actual stream URL via yt-dlp and downloads the raw bytes."""
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    ydl_opts = {
+        'format': 'best[ext=mp4]/best',  # Grabs standard combined audio/video MP4 stream
+        'quiet': True,
+        'no_warnings': True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            stream_url = info.get('url')
+            
+            # Read direct stream bytes into buffer payload
+            if stream_url:
+                with urllib.request.urlopen(stream_url) as response:
+                    return response.read()
+    except Exception as e:
+        return None
+    return None
+
 def generate_math_problem():
     op = random.choice(['+', '-', '*'])
     n1, n2 = random.randint(1, 10), random.randint(1, 10)
@@ -144,90 +190,97 @@ def generate_math_problem():
     else: ans = n1 * n2
     return {"question": f"{n1} {op} {n2}", "answer": ans}
 
-# --- MAIN APP LAYOUT BAR ---
 st.title("Gleearn Kids 🏠")
-c_theme, c_nav = st.columns(2)
-with c_theme:
-    st.session_state.theme = st.selectbox("Choose App Palette Theme:", options=list(THEMES.keys()))
-with c_nav:
-    view_mode = st.radio("Navigation View Target:", ["Main Stream Feed", "My Favorites Vault"], horizontal=True)
 
-# Process visual slice limitations
 master_list = st.session_state.videos
 if view_mode == "My Favorites Vault":
     master_list = [v for v in st.session_state.videos if v['id'] in st.session_state.favorites]
 
-# Grab only the videos allowed by current limit step size
-displayed_videos = master_list[:st.session_state.current_limit]
+if search_query:
+    master_list = [v for v in master_list if search_query.lower() in v['title'].lower()]
 
-# --- THE GRIDS DISPLAY (Everything stays strictly in position) ---
-if displayed_videos:
-    cols = st.columns(3)
-    for idx, vid in enumerate(displayed_videos):
-        col = cols[idx % 3]
-        with col:
-            st.markdown(f"""
-                <div class='video-card'>
-                    <img src="{vid['thumb']}" style='width:100%; border-radius:6px;'>
-                    <h5 style='margin:10px 0; height:40px; overflow:hidden;'>{vid['title']}</h5>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            # Context-Aware Video Player Rendering right under its card title snippet
-            if st.session_state.get(f"play_active_{vid['id']}", False):
-                st.video(f"https://www.youtube.com/watch?v={vid['id']}")
-                if st.button("❌ Close Video", key=f"close_{vid['id']}"):
-                    st.session_state[f"play_active_{vid['id']}"] = False
-                    st.rerun()
-
-            b_col1, b_col2, b_col3 = st.columns(3)
-            with b_col1:
-                if st.button("▶️ Play", key=f"btn_{vid['id']}"):
-                    st.session_state[f"play_active_{vid['id']}"] = True
-                    st.rerun()
-                        
-            with b_col2:
-                if vid['id'] in st.session_state.favorites:
-                    if st.button("❤️ Unfav", key=f"fav_{vid['id']}"):
-                        st.session_state.favorites.remove(vid['id'])
-                        st.rerun()
-                else:
-                    if st.button("⭐ Fav", key=f"fav_{vid['id']}"):
-                        st.session_state.favorites.append(vid['id'])
-                        st.rerun()
-                        
-            with b_col3:
-                st.download_button(
-                    label="📥 Save",
-                    data=f"Video ID Meta Reference Tag: {vid['id']}",
-                    file_name=f"gleearn_{vid['id']}.txt",
-                    mime="text/plain",
-                    key=f"dl_{vid['id']}"
-                )
-
-# --- THE BOTTOM MOUNTED PROGRESS GATING CHECKPOINT ---
-if view_mode != "My Favorites Vault" and len(master_list) > st.session_state.current_limit:
-    st.markdown("---")
-    st.markdown("<center><h3>🛑 Math Checkpoint! Solve to load 12 more videos</h3></center>", unsafe_allow_html=True)
+if master_list:
+    chunk_size = 12
+    total_available_chunks = (len(master_list) + chunk_size - 1) // chunk_size
+    visible_chunks_count = total_available_chunks if view_mode == "My Favorites Vault" else st.session_state.unlocked_tier
     
-    # Initialize bottom math question if empty
-    if not st.session_state.math_problem:
-        st.session_state.math_problem = generate_math_problem()
+    for tier_idx in range(visible_chunks_count):
+        start_idx = tier_idx * chunk_size
+        end_idx = min(start_idx + chunk_size, len(master_list))
+        chunk_videos = master_list[start_idx:end_idx]
         
-    st.info(f"**Grown-Up Verification Puzzle:** Calculate:  ` {st.session_state.math_problem['question']} = ? `")
-    
-    col_ans, col_sub = st.columns([3, 1])
-    with col_ans:
-        user_input = st.text_input("Type your answer here to reveal more items:", key="bottom_gate_input", label_visibility="collapsed")
-    with col_sub:
-        if st.button("Unlock Next Feed 🔓", use_container_width=True):
-            try:
-                if int(user_input) == st.session_state.math_problem['answer']:
-                    st.session_state.current_limit += 12 # Increment view block footprint by 12 items
-                    st.session_state.math_problem = None  # Flush out old problem statement to force fresh evaluation next loop
-                    st.toast("Success! Loading more videos down below...", icon="🎉")
-                    st.rerun()
-                else:
-                    st.error("Oops! Not quite right. Ask mom/dad for help! 💡")
-            except ValueError:
-                st.error("Please provide a valid whole number value.")
+        cols = st.columns(3)
+        for sub_idx, vid in enumerate(chunk_videos):
+            global_idx = start_idx + sub_idx
+            col = cols[sub_idx % 3]
+            
+            with col:
+                st.markdown(f"""
+                    <div class='video-card'>
+                        <img src="{vid['thumb']}" style='width:100%; border-radius:6px;'>
+                        <h5>{vid['title']}</h5>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                if st.session_state.get(f"play_active_{vid['id']}", False):
+                    st.video(f"https://www.youtube.com/watch?v={vid['id']}")
+                    if st.button("❌ Close Video", key=f"close_{vid['id']}"):
+                        st.session_state[f"play_active_{vid['id']}"] = False
+                        st.rerun()
+
+                b_col1, b_col2, b_col3 = st.columns(3)
+                with b_col1:
+                    if st.button("▶️ Play", key=f"btn_{vid['id']}"):
+                        st.session_state[f"play_active_{vid['id']}"] = True
+                        st.rerun()
+                            
+                with b_col2:
+                    if vid['id'] in st.session_state.favorites:
+                        if st.button("❤️ Unfav", key=f"fav_{vid['id']}"):
+                            st.session_state.favorites.remove(vid['id'])
+                            st.rerun()
+                    else:
+                        if st.button("⭐ Fav", key=f"fav_{vid['id']}"):
+                            st.session_state.favorites.append(vid['id'])
+                            st.rerun()
+                            
+                with b_col3:
+                    # The download button now runs on-demand via background thread when clicked
+                    st.download_button(
+                        label="📥 Save",
+                        data=download_video_bytes(vid['id']),
+                        file_name=f"{vid['id']}.mp4",
+                        mime="video/mp4",
+                        key=f"dl_{vid['id']}"
+                    )
+        
+        next_tier_has_content = len(master_list) > end_idx
+        next_tier_is_locked = st.session_state.unlocked_tier == (tier_idx + 1)
+        
+        if view_mode != "My Favorites Vault" and next_tier_has_content and next_tier_is_locked:
+            st.markdown("---")
+            st.markdown(f"<center><h3>🛑 Checkpoint reached after {end_idx} videos! Solve to unlock next row</h3></center>", unsafe_allow_html=True)
+            
+            if tier_idx not in st.session_state.math_problems:
+                st.session_state.math_problems[tier_idx] = generate_math_problem()
+                
+            problem = st.session_state.math_problems[tier_idx]
+            st.info(f"**Grown-Up Verification Puzzle:** Calculate:  ` {problem['question']} = ? `")
+            
+            col_ans, col_sub = st.columns([3, 1])
+            with col_ans:
+                user_input = st.text_input("Type answer here:", key=f"gate_input_{tier_idx}", label_visibility="collapsed")
+            with col_sub:
+                if st.button("Unlock Next Feed 🔓", key=f"gate_btn_{tier_idx}", use_container_width=True):
+                    try:
+                        if int(user_input) == problem['answer']:
+                            st.session_state.unlocked_tier += 1  
+                            st.toast("Success! Next row loaded down below...", icon="🎉")
+                            st.rerun()
+                        else:
+                            st.error("Oops! Not quite right. Ask mom/dad for help! 💡")
+                    except ValueError:
+                        st.error("Please provide a valid whole number value.")
+            st.markdown("---")
+else:
+    st.info("No child-safe video content entries match your active filter paths.")
