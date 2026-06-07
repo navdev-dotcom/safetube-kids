@@ -158,25 +158,24 @@ def fetch_all_pool_videos():
 if not st.session_state.videos:
     st.session_state.videos = fetch_all_pool_videos()
 
-# --- BACKEND REAL-TIME DOWNLOAD PIPELINE ---
+# --- SAFE DOWNLOAD CHECKER ENGINE ---
 def download_video_bytes(video_id):
-    """Fetches the actual stream URL via yt-dlp and downloads the raw bytes."""
+    """Fetches video data or handles rate limits safely."""
     url = f"https://www.youtube.com/watch?v={video_id}"
     ydl_opts = {
-        'format': 'best[ext=mp4]/best',  # Grabs standard combined audio/video MP4 stream
+        'format': 'best[ext=mp4]/best',
         'quiet': True,
         'no_warnings': True,
+        'socket_timeout': 4  # Strict timeout limit to prevent cloud freezes
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             stream_url = info.get('url')
-            
-            # Read direct stream bytes into buffer payload
             if stream_url:
-                with urllib.request.urlopen(stream_url) as response:
+                with urllib.request.urlopen(stream_url, timeout=4) as response:
                     return response.read()
-    except Exception as e:
+    except:
         return None
     return None
 
@@ -239,20 +238,35 @@ if master_list:
                         if st.button("❤️ Unfav", key=f"fav_{vid['id']}"):
                             st.session_state.favorites.remove(vid['id'])
                             st.rerun()
-                    else:
-                        if st.button("⭐ Fav", key=f"fav_{vid['id']}"):
-                            st.session_state.favorites.append(vid['id'])
-                            st.rerun()
+                else:
+                    if st.button("⭐ Fav", key=f"fav_{vid['id']}"):
+                        st.session_state.favorites.append(vid['id'])
+                        st.rerun()
                             
                 with b_col3:
-                    # The download button now runs on-demand via background thread when clicked
-                    st.download_button(
-                        label="📥 Save",
-                        data=download_video_bytes(vid['id']),
-                        file_name=f"{vid['id']}.mp4",
-                        mime="video/mp4",
-                        key=f"dl_{vid['id']}"
-                    )
+                    # Fallback Download Wrapper
+                    video_bytes = None
+                    try:
+                        video_bytes = download_video_bytes(vid['id'])
+                    except:
+                        pass
+                    
+                    if video_bytes is None:
+                        # Fallback link button so it completely avoids Streamlit type errors
+                        st.markdown(
+                            f'<a href="https://ssyoutube.com/en141/youtube-video-downloader?q=https://www.youtube.com/watch?v={vid["id"]}" '
+                            f'target="_blank"><button style="width:100%; border-radius:5px; border:2px solid {current_colors["accent"]}; '
+                            f'background-color:transparent; color:{current_colors["text"]}; padding:4px; cursor:pointer;">📥 Save</button></a>',
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.download_button(
+                            label="📥 Save",
+                            data=video_bytes,
+                            file_name=f"{vid['id']}.mp4",
+                            mime="video/mp4",
+                            key=f"dl_{vid['id']}"
+                        )
         
         next_tier_has_content = len(master_list) > end_idx
         next_tier_is_locked = st.session_state.unlocked_tier == (tier_idx + 1)
