@@ -279,8 +279,8 @@ st.title("Gleearn Kids 🏠")
 
 # --- 🛡️ SAFETUBE LINK SANITIZER COMPONENT (DIY.org Clone) ---
 st.markdown(
-    "<div class='safetube-banner'><h3>🛡️ SafeTube Link Sanitizer</h3>"
-    "<p style='margin:0;'>Drop any YouTube address link below to watch it clean—no ads, no dangerous suggested updates, no side scroll bars, and zero comment sections.</p></div>", 
+    "<div class='safetube-banner'><h3>🛡️ Gleearn Kids Link Sanitizer</h3>"
+    "<p style='margin:0;'>Drop any YouTube address link below to watch it clean—no ads and zero comment sections.</p></div>", 
     unsafe_allow_html=True
 )
 
