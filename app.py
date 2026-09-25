@@ -8,41 +8,51 @@ import json
 # Page configuration
 st.set_page_config(page_title="Gleearn Kids 🏠", layout="wide", page_icon="🏠")
 
-# --- CORE BROWSER LOCALSTORAGE & ASSISTIVE BRIDGE ---
-def init_local_storage():
-    """Injects JS bridge for persistent state and browser TTS / Accessibility triggers."""
-    js_code = """
+# --- PERSISTENT CLIENT-SIDE AUDIO & ACCESSIBILITY ENGINE ---
+def inject_persistent_audio_engine():
+    """
+    Injects a persistent JavaScript listener into the parent app window.
+    This bypasses iframe destruction issues during Streamlit reruns.
+    """
+    js_engine = """
     <script>
-    const sendToStreamlit = (key, value) => {
-        parent.postMessage({type: 'streamlit:setComponentValue', value: {key: key, data: value}}, '*');
-    };
-    
-    window.addEventListener('message', (e) => {
-        if(e.data.type === 'streamlit:render') {
-            let favs = localStorage.getItem('gleearn_favs') || '[]';
-            let channels = localStorage.getItem('gleearn_whitelist') || '{}';
-            sendToStreamlit('sync', {favorites: JSON.parse(favs), whitelist: JSON.parse(channels)});
-        }
-    });
-
-    // Assistive Text-To-Speech Engine Trigger (AAC/Speech Support)
-    window.speakText = function(text) {
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel();
-            var msg = new SpeechSynthesisUtterance(text);
-            msg.rate = 0.9;
-            msg.pitch = 1.0;
-            window.speechSynthesis.speak(msg);
-        }
-    };
+    (function() {
+        // Define global speaker function on top-level parent window
+        window.parent.gleearnSpeak = function(text) {
+            if ('speechSynthesis' in window) {
+                // Cancel ongoing utterances to prevent overlapping queues
+                window.parent.speechSynthesis.cancel();
+                
+                var msg = new SpeechSynthesisUtterance(text);
+                msg.rate = 0.9;   // Accessible, steady speaking pace
+                msg.pitch = 1.0;  // Natural pitch
+                msg.lang = 'en-US';
+                
+                // Trigger speech synthesis directly in root frame
+                window.parent.speechSynthesis.speak(msg);
+            } else {
+                console.warn("Speech Synthesis API not supported on this browser.");
+            }
+        };
+    })();
     </script>
     """
-    st.components.v1.html(js_code, height=0, width=0)
+    st.components.v1.html(js_engine, height=0, width=0)
 
 def speak(text):
-    """Helper component to trigger client-side Text-To-Speech."""
-    clean_text = text.replace("'", "\\'").replace("\n", " ")
-    st.components.v1.html(f"<script>window.parent.speakText('{clean_text}');</script>", height=0, width=0)
+    """Triggers the root-window TTS engine safely without state loss."""
+    clean_text = text.replace("'", "\\'").replace('"', '\\"').replace("\n", " ")
+    st.components.v1.html(
+        f"""
+        <script>
+            if (window.parent && window.parent.gleearnSpeak) {{
+                window.parent.gleearnSpeak('{clean_text}');
+            }}
+        </script>
+        """,
+        height=0,
+        width=0
+    )
 
 # --- THE COMPLETE 64 SAFE CHANNELS POOL ---
 DEFAULT_CHANNELS = {
@@ -128,40 +138,24 @@ if "videos" not in st.session_state: st.session_state.videos = []
 if "unlocked_tier" not in st.session_state: st.session_state.unlocked_tier = 1  
 if "math_problems" not in st.session_state: st.session_state.math_problems = {}
 if "screentime_start" not in st.session_state: st.session_state.screentime_start = time.time()
-if "storage_synced" not in st.session_state: st.session_state.storage_synced = False
 
 # Assistive Technology States
 if "brightness" not in st.session_state: st.session_state.brightness = 100
 if "dyslexic_font" not in st.session_state: st.session_state.dyslexic_font = False
 if "focus_lock" not in st.session_state: st.session_state.focus_lock = False
 if "active_playing_id" not in st.session_state: st.session_state.active_playing_id = None
-if "aac_last_said" not in st.session_state: st.session_state.aac_last_said = ""
+if "speech_queue" not in st.session_state: st.session_state.speech_queue = None
 
-# Inject JS storage bridge
-storage_payload = st.session_state.get('storage_bridge')
-init_local_storage()
+# Inject persistent JS speaker root engine
+inject_persistent_audio_engine()
 
-# Process data elements from local client profile
-if storage_payload and not st.session_state.storage_synced:
-    sync_data = storage_payload.get('value', {})
-    if sync_data:
-        st.session_state.favorites = sync_data.get('favorites', [])
-        st.session_state.custom_whitelist = sync_data.get('whitelist', {})
-        st.session_state.storage_synced = True
-        st.rerun()
+# Execute pending speech triggers from session state
+if st.session_state.speech_queue:
+    speak(st.session_state.speech_queue)
+    st.session_state.speech_queue = None
 
 # Build aggregated running safe dictionary
 ALL_CHANNELS = {**DEFAULT_CHANNELS, **st.session_state.custom_whitelist}
-
-# --- LOCALSTORAGE WRITE HELPER ---
-def commit_storage_change(key_target, data_payload):
-    """Updates device's localStorage container via HTML5 data payload."""
-    js_write = f"""
-    <script>
-    localStorage.setItem('{key_target}', '{json.dumps(data_payload)}');
-    </script>
-    """
-    st.components.v1.html(js_write, height=0, width=0)
 
 # --- VIDEO EXTRACTOR ENGINE ---
 @st.cache_data(ttl=900)
@@ -171,7 +165,6 @@ def fetch_pool_videos(channel_map, search_term=None):
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         if search_term:
-            # Deep Live Filtering: Injects keywords context-matched to learning terms
             try:
                 info = ydl.extract_info(f"ytsearch30:{search_term} kids educational", download=False)
                 if info and 'entries' in info:
@@ -186,7 +179,6 @@ def fetch_pool_videos(channel_map, search_term=None):
             except Exception:
                 pass
         else:
-            # Aggregator Mode: Pick a sample flight of 30 channels to avoid heavy API penalties
             sampled_channels = random.sample(list(channel_map.items()), min(len(channel_map), 30))
             for name, url in sampled_channels:
                 try:
@@ -206,7 +198,6 @@ def fetch_pool_videos(channel_map, search_term=None):
     return videos
 
 def extract_video_id(url_string):
-    """Parses standard long, short, and mobile YouTube strings clean."""
     if "youtu.be/" in url_string: return url_string.split("youtu.be/")[-1].split("?")[0]
     if "v=" in url_string: return url_string.split("v=")[-1].split("&")[0]
     if "embed/" in url_string: return url_string.split("embed/")[-1].split("?")[0]
@@ -218,18 +209,16 @@ def generate_math_problem():
     if op == '-': n1, n2 = max(n1, n2), min(n1, n2)
     return {"question": f"{n1} {op} {n2}", "answer": eval(f"{n1} {op} {n2}")}
 
-# --- APPARATUS SIDEBAR CONTROLS ---
+# --- SIDEBAR CONTROLS ---
 if not st.session_state.focus_lock:
     with st.sidebar:
         st.header("⚙️ Parent & Educator Controls")
         
-        # --- AT ACCESSIBILITY CONTROLS ---
         st.subheader("♿ Assistive Technology (AT) Panel")
         st.session_state.brightness = st.slider("🔅 Screen Brightness Adjuster (%):", 20, 100, st.session_state.brightness, step=5)
         st.session_state.dyslexic_font = st.toggle("🔤 OpenDyslexic / Accessible Font", value=st.session_state.dyslexic_font)
         
         st.markdown("---")
-        # Screentime Monitor Component
         st.subheader("⏱️ Screentime Monitor")
         allowed_mins = st.slider("Daily Limit Allocation (Minutes):", 5, 120, value=30, step=5)
         elapsed_seconds = time.time() - st.session_state.screentime_start
@@ -237,7 +226,7 @@ if not st.session_state.focus_lock:
         
         if remaining_mins <= 0:
             st.error("🛑 Sensory Break / Time's Up! Time to rest eyes.")
-            speak("Time is up! Let's take a break and rest our eyes.")
+            st.session_state.speech_queue = "Time is up! Let us take a break and rest our eyes."
             st.stop()
         else:
             st.info(f"⌛ Remaining Watch Time: **{remaining_mins:.1f} Mins**")
@@ -248,7 +237,6 @@ if not st.session_state.focus_lock:
         view_mode = st.radio("Navigation View Target:", ["Main Stream Feed", "My Favorites Vault"])
         st.markdown("---")
         
-        # Whitelisting Panel (Gated via Verification Puzzle)
         st.subheader("🔒 Custom Whitelisting")
         if "parent_verified" not in st.session_state: st.session_state.parent_verified = False
         
@@ -269,8 +257,7 @@ if not st.session_state.focus_lock:
             if st.button("➕ Save Channel to Device"):
                 if new_name and "@" in new_url:
                     st.session_state.custom_whitelist[new_name] = new_url
-                    commit_storage_change('gleearn_whitelist', st.session_state.custom_whitelist)
-                    st.toast("Channel Saved Locally!", icon="💾")
+                    st.toast("Channel Saved!", icon="💾")
                     st.cache_data.clear()
                     st.rerun()
                     
@@ -293,7 +280,7 @@ font_css = """
 
 brightness_filter = f"filter: brightness({st.session_state.brightness}%);"
 
-# Apply Dynamic UI CSS Framework Injection with AT Controls
+# Apply Dynamic UI CSS Framework Injection
 st.markdown(f"""
     <style>
         {font_css}
@@ -323,32 +310,33 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# Main Title App Entry Point
+# Main Title Entry
 st.title("Gleearn Kids 🏠")
 
-# --- ASSISTIVE TECHNOLOGY: AAC CORE CHOICE BOARD ---
+# --- WORKING AAC CORE CHOICE BOARD ---
 st.markdown("##### 🗣️ Communication Core Board (AAC Assistant)")
 aac_col1, aac_col2, aac_col3, aac_col4, aac_col5 = st.columns(5)
+
 with aac_col1:
     if st.button("➕ More", use_container_width=True):
-        speak("I want more please")
-        st.session_state.aac_last_said = "I want more please"
+        st.session_state.speech_queue = "I want more please"
+        st.rerun()
 with aac_col2:
     if st.button("🛑 Stop", use_container_width=True):
-        speak("Stop please")
-        st.session_state.aac_last_said = "Stop please"
+        st.session_state.speech_queue = "Stop please"
+        st.rerun()
 with aac_col3:
     if st.button("🙋 Help", use_container_width=True):
-        speak("I need help please")
-        st.session_state.aac_last_said = "I need help please"
+        st.session_state.speech_queue = "I need help please"
+        st.rerun()
 with aac_col4:
     if st.button("💡 I Want", use_container_width=True):
-        speak("I want this video")
-        st.session_state.aac_last_said = "I want this video"
+        st.session_state.speech_queue = "I want this video"
+        st.rerun()
 with aac_col5:
     if st.button("✅ All Done", use_container_width=True):
-        speak("All done watching")
-        st.session_state.aac_last_said = "All done watching"
+        st.session_state.speech_queue = "All done watching"
+        st.rerun()
 
 # --- ASSISTIVE FOCUS LOCK OVERRIDE ---
 if st.session_state.focus_lock:
@@ -363,10 +351,10 @@ if st.session_state.focus_lock:
         st.video(f"https://www.youtube.com/watch?v={st.session_state.active_playing_id}")
     st.stop()
 
-# --- 🛡️ SAFETUBE LINK SANITIZER COMPONENT (DIY.org Clone) ---
+# --- SAFETUBE LINK SANITIZER ---
 st.markdown(
     "<div class='safetube-banner'><h3>🛡️ Gleearn Kids Link Sanitizer</h3>"
-    "<p style='margin:0;'>Drop any YouTube address link below to watch it clean—no ads and zero comment sections.</p></div>", 
+    "<p style='margin:0;'>Drop any YouTube address link below to watch clean—no ads or comment sections.</p></div>", 
     unsafe_allow_html=True
 )
 
@@ -375,7 +363,6 @@ if st_link_input:
     extracted_id = extract_video_id(st_link_input)
     if extracted_id:
         st.markdown("### 🍿 Distraction-Free Screening Room")
-        
         c_vid, c_lock = st.columns([3, 1])
         with c_lock:
             if st.button("🔒 Lock Focus Shield Mode", use_container_width=True):
@@ -384,12 +371,9 @@ if st_link_input:
                 st.rerun()
 
         st.video(f"https://www.youtube.com/watch?v={extracted_id}")
-        st.info("✨ Extraneous video recommendation engines and algorithm sidebars have been neutralized successfully.")
         st.markdown("---")
-    else:
-        st.error("Could not parse Video ID. Please ensure you are entering a valid YouTube watch link.")
 
-# --- ROUTETTE ENGINE & LIVE MULTI-THREAD FILTERS ---
+# --- ROULETTE ENGINE & SEARCH ---
 col_search, col_roulette, col_tts = st.columns([3, 1, 1])
 with col_search:
     search_query = st.text_input("🔍 Search Safe Videos (Deep live querying):", value="", placeholder="Type queries like 'dinosaur facts', 'drawing tutorials'...")
@@ -402,7 +386,8 @@ with col_roulette:
 with col_tts:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🔊 Read Screen", use_container_width=True):
-        speak("Welcome to Gleearn Kids. Select a video below to start learning.")
+        st.session_state.speech_queue = "Welcome to Gleearn Kids. Select a video below to start learning."
+        st.rerun()
 
 # Handle Processing Chains
 if search_query:
@@ -415,7 +400,7 @@ else:
 if view_mode == "My Favorites Vault":
     master_list = [v for v in master_list if v['id'] in st.session_state.favorites]
 
-# --- MAIN RESPONSIVE RECTANGLE RENDER GRID ---
+# --- MAIN RESPONSIVE RENDER GRID ---
 if master_list:
     chunk_size = 12
     total_available_chunks = (len(master_list) + chunk_size - 1) // chunk_size
@@ -459,17 +444,16 @@ if master_list:
                         st.rerun()
                 with b_col2:
                     if st.button("🔊 Read", key=f"tts_{vid['id']}", use_container_width=True):
-                        speak(vid['title'])
+                        st.session_state.speech_queue = vid['title']
+                        st.rerun()
                 with b_col3:
                     if vid['id'] in st.session_state.favorites:
                         if st.button("❤️ Unfav", key=f"fav_{vid['id']}", use_container_width=True):
                             st.session_state.favorites.remove(vid['id'])
-                            commit_storage_change('gleearn_favs', st.session_state.favorites)
                             st.rerun()
                     else:
                         if st.button("⭐ Fav", key=f"fav_{vid['id']}", use_container_width=True):
                             st.session_state.favorites.append(vid['id'])
-                            commit_storage_change('gleearn_favs', st.session_state.favorites)
                             st.rerun()
                 with b_col4:
                     ss_download_url = f"https://ssyoutube.com/watch?v={vid['id']}"
@@ -503,11 +487,12 @@ if master_list:
                         if int(user_input) == problem['answer']:
                             st.session_state.unlocked_tier += 1  
                             st.toast("Success! Next row loaded down below...", icon="🎉")
-                            speak("Success! Next row loaded down below...")
+                            st.session_state.speech_queue = "Great job! Next row unlocked."
                             st.rerun()
                         else:
                             st.error("Oops! Not quite right. Ask mom/dad for help! 💡")
-                            speak("Oops! Not quite right. Ask for help.")
+                            st.session_state.speech_queue = "Oops! Not quite right. Ask for help."
+                            st.rerun()
                     except ValueError:
                         st.error("Please provide a valid whole number value.")
             st.markdown("---")
